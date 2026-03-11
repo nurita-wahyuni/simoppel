@@ -156,7 +156,7 @@ Setelah menjalankan script `seed_direct.py`, Anda dapat login menggunakan akun b
 
 | Role              | Email               | Password      | Keterangan                                                      |
 | :---------------- | :------------------ | :------------ | :-------------------------------------------------------------- |
-| **Administrator** | `admin@example.com` | `admin123`    | Akses penuh ke dashboard admin, rekap data, dan manajemen user. |
+| **Administrator** | `admin@example.com` | `password123` | Akses penuh ke dashboard admin, rekap data, dan manajemen user. |
 | **Operator**      | `andi@example.com`  | `password123` | Akses untuk input data kapal dan melihat laporan sendiri.       |
 | **Operator**      | `budi@example.com`  | `password123` | Akun operator tambahan untuk simulasi.                          |
 

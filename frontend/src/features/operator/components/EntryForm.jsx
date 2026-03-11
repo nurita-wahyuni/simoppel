@@ -1,621 +1,501 @@
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import PropTypes from "prop-types";
-import {
-  Save,
-  RefreshCw,
-  XCircle,
-  Ship,
-  MapPin,
-  Package,
-  Calendar,
-} from "lucide-react";
-
-// --- CONSTANTS FOR DROPDOWNS ---
-const COUNTRIES = [
-  "Indonesia",
-  "Singapore",
-  "Malaysia",
-  "Panama",
-  "Liberia",
-  "Marshall Islands",
-  "China",
-  "Hong Kong",
-  "Vietnam",
-  "Thailand",
-  "Japan",
-  "South Korea",
-  "India",
-  "Greece",
-  "Malta",
-  "USA",
-  "UK",
-  "Netherlands",
-].sort();
-
-const PORTS = [
-  "Tanjung Priok",
-  "Tanjung Perak",
-  "Belawan",
-  "Makassar",
-  "Batam",
-  "Dumai",
-  "Cilegon",
-  "Semarang",
-  "Banjarmasin",
-  "Balikpapan",
-  "Pontianak",
-  "Singapore",
-  "Shanghai",
-  "Port Klang",
-  "Laem Chabang",
-  "Rotterdam",
-].sort();
-
-const BERTHS = [
-  "Dermaga Umum 01",
-  "Dermaga Umum 02",
-  "Dermaga Umum 03",
-  "Terminal Petikemas A",
-  "Terminal Petikemas B",
-  "Dermaga Curah Cair",
-  "Dermaga Curah Kering",
-  "Jetty Khusus I",
-  "Jetty Khusus II",
-  "Lainnya",
+import { submitEntries } from "../../../services/api";
+const CATEGORIES = [
+  { key: "luar_negeri", title: "Luar Negeri" },
+  { key: "dalam_negeri", title: "Dalam Negeri" },
+  { key: "perintis", title: "Perintis" },
+  { key: "rakyat", title: "Rakyat" },
 ];
 
-const COMMODITIES = [
-  "TON dan MT",
+const JENIS_KEGIATAN_OPTIONS = ["Bongkar", "Muat"];
+
+const KOMODITAS_OPTIONS = [
+  "Ton dan MT",
   "Sirtu, Pasir, Batu",
   "BBM",
-  "Motor",
   "Mobil",
+  "Motor",
   "Truk",
   "Bus",
   "Alat Berat",
-  "Container (kosong)",
+  "Container Kosong",
   "Penumpang",
 ];
 
-const UNIT_MAPPING = {
-  "TON dan MT": "Ton/MT",
+const SATUAN_OPTIONS = ["Ton/MT", "M3", "kl", "Unit", "teus", "Orang"];
+
+const JENIS_KEMASAN_OPTIONS = [
+  "Curah",
+  "Bag",
+  "Box",
+  "Drum",
+  "Peti Kemas",
+  "Kandang",
+  "Unit",
+  "Lainnya",
+];
+
+const TableField = ({ children }) => (
+  <td className="px-3 py-3 align-top border-t border-slate-200">{children}</td>
+);
+
+TableField.propTypes = {
+  children: PropTypes.node,
+};
+
+const createEmptyRow = () => ({
+  loa: 0,
+  grt: 0,
+  activity: "",
+  commodity: "",
+  description: "",
+  amount: 0,
+  unit: "",
+  packaging: "",
+});
+
+const createInitialEntriesState = () => ({
+  luar_negeri: [createEmptyRow()],
+  dalam_negeri: [createEmptyRow()],
+  perintis: [createEmptyRow()],
+  rakyat: [createEmptyRow()],
+});
+
+const COMMODITY_UNIT_MAPPING = {
+  "Ton dan MT": "Ton/MT",
   "Sirtu, Pasir, Batu": "M3",
-  BBM: "KL",
-  Motor: "Unit",
+  BBM: "kl",
   Mobil: "Unit",
+  Motor: "Unit",
   Truk: "Unit",
   Bus: "Unit",
   "Alat Berat": "Unit",
-  "Container (kosong)": "Teus",
+  "Container Kosong": "teus",
   Penumpang: "Orang",
 };
 
-const EntryForm = ({
-  initialData,
-  onSubmit,
-  onCancel,
-  isSubmitting,
+const hasRowData = (row) => {
+  const loaHasValue = typeof row.loa === "number" && row.loa !== 0;
+  const grtHasValue = typeof row.grt === "number" && row.grt !== 0;
+  const activityHasValue =
+    typeof row.activity === "string" && row.activity.trim() !== "";
+  const commodityHasValue =
+    typeof row.commodity === "string" && row.commodity.trim() !== "";
+  const descriptionHasValue =
+    typeof row.description === "string" && row.description.trim() !== "";
+  const amountHasValue = typeof row.amount === "number" && row.amount !== 0;
+  const unitHasValue = typeof row.unit === "string" && row.unit.trim() !== "";
+  const packagingHasValue =
+    typeof row.packaging === "string" && row.packaging.trim() !== "";
+
+  return (
+    loaHasValue ||
+    grtHasValue ||
+    activityHasValue ||
+    commodityHasValue ||
+    descriptionHasValue ||
+    amountHasValue ||
+    unitHasValue ||
+    packagingHasValue
+  );
+};
+
+const getAmountPlaceholder = (commodity) => {
+  if (commodity === "Penumpang") return "Jumlah Penumpang";
+  if (commodity === "BBM") return "Volume BBM";
+  return "Jumlah / Massa";
+};
+
+const formatNumber = (value) => {
+  if (!Number.isFinite(value) || value === 0) return "0";
+  return value.toLocaleString("id-ID");
+};
+
+const EntryCategoryCard = ({
+  title,
+  rows,
   isDisabled,
+  onRowActivate,
+  onRowChange,
 }) => {
-  const defaultFormState = {
-    nama_kapal: "",
-    kategori_pelayaran: "Dalam Negeri",
-    loa: 0,
-    grt: 0,
-    jenis_kegiatan: "Bongkar",
-    bendera: "",
-    pemilik_agen: "",
-    pelabuhan_asal: "",
-    pelabuhan_tujuan: "",
-    tanggal_tambat: "",
-    dermaga: "",
-    keterangan: "",
-    jenis_muatan: "Barang",
-    komoditas: "", // New Field
-    nama_muatan: "", // Now optional/secondary
-    jumlah_muatan: 0,
-    satuan_muatan: "", // Auto-populated
-    jenis_kemasan: "Curah",
-    tanggal_laporan: new Date().toISOString().split("T")[0],
+  const dataRows = rows.filter(hasRowData);
+
+  const totalLoa = dataRows.reduce(
+    (acc, r) => acc + (r.loa > 0 ? r.loa : 0),
+    0
+  );
+  const totalGrt = dataRows.reduce(
+    (acc, r) => acc + (r.grt > 0 ? r.grt : 0),
+    0
+  );
+  const totalAmount = dataRows.reduce(
+    (acc, r) => acc + (r.amount > 0 ? r.amount : 0),
+    0
+  );
+
+  const descriptionList = dataRows
+    .map((r) => (r.description || "").trim())
+    .filter(Boolean);
+  const descriptionText = descriptionList.length
+    ? descriptionList.join(", ")
+    : "-";
+
+  const unitSet = new Set(
+    dataRows.map((r) => (r.unit || "").trim()).filter(Boolean)
+  );
+  const unitText = unitSet.size ? Array.from(unitSet).join(", ") : "-";
+
+  return (
+    <div className="bg-white p-6 rounded-xl shadow-soft border border-slate-100">
+      <div className="mb-4 border-b border-slate-100 pb-4">
+        <h3 className="text-lg font-bold text-slate-800">{title}</h3>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[1100px] border border-slate-200 rounded-lg overflow-hidden">
+          <thead className="bg-slate-50">
+            <tr className="text-left text-xs font-bold text-slate-600 uppercase tracking-wide">
+              <th className="px-3 py-3">LOA</th>
+              <th className="px-3 py-3">GRT</th>
+              <th className="px-3 py-3">Jenis Kegiatan</th>
+              <th className="px-3 py-3">Komoditas</th>
+              <th className="px-3 py-3">Keterangan Barang</th>
+              <th className="px-3 py-3">Jumlah/Massa/Penumpang</th>
+              <th className="px-3 py-3">Satuan</th>
+              <th className="px-3 py-3">Jenis Kemasan</th>
+            </tr>
+          </thead>
+          <tbody className="bg-white">
+            {rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                <TableField>
+                  <input
+                    type="number"
+                    placeholder="0"
+                    className="input-field text-sm h-9"
+                    disabled={isDisabled}
+                    value={row.loa}
+                    onFocus={() => onRowActivate(rowIndex)}
+                    onChange={(e) =>
+                      onRowChange(
+                        rowIndex,
+                        "loa",
+                        parseFloat(e.target.value) || 0
+                      )
+                    }
+                  />
+                </TableField>
+                <TableField>
+                  <input
+                    type="number"
+                    placeholder="0"
+                    className="input-field text-sm h-9"
+                    disabled={isDisabled}
+                    value={row.grt}
+                    onFocus={() => onRowActivate(rowIndex)}
+                    onChange={(e) =>
+                      onRowChange(
+                        rowIndex,
+                        "grt",
+                        parseFloat(e.target.value) || 0
+                      )
+                    }
+                  />
+                </TableField>
+                <TableField>
+                  <select
+                    className="input-field text-sm h-9"
+                    disabled={isDisabled}
+                    value={row.activity}
+                    onFocus={() => onRowActivate(rowIndex)}
+                    onChange={(e) =>
+                      onRowChange(rowIndex, "activity", e.target.value)
+                    }
+                  >
+                    <option value=""></option>
+                    {JENIS_KEGIATAN_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </TableField>
+                <TableField>
+                  <select
+                    className="input-field text-sm h-9"
+                    disabled={isDisabled}
+                    value={row.commodity}
+                    onFocus={() => onRowActivate(rowIndex)}
+                    onChange={(e) => {
+                      const nextCommodity = e.target.value;
+                      onRowChange(rowIndex, "commodity", nextCommodity);
+                      const mappedUnit =
+                        COMMODITY_UNIT_MAPPING[nextCommodity] || "";
+                      onRowChange(rowIndex, "unit", mappedUnit);
+                    }}
+                  >
+                    <option value=""></option>
+                    {KOMODITAS_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </TableField>
+                <TableField>
+                  <input
+                    type="text"
+                    className="input-field text-sm h-9"
+                    disabled={isDisabled}
+                    value={row.description}
+                    onFocus={() => onRowActivate(rowIndex)}
+                    onChange={(e) =>
+                      onRowChange(rowIndex, "description", e.target.value)
+                    }
+                  />
+                </TableField>
+                <TableField>
+                  <input
+                    type="number"
+                    placeholder={getAmountPlaceholder(row.commodity)}
+                    className="input-field text-sm h-9"
+                    disabled={isDisabled}
+                    value={row.amount}
+                    onFocus={() => onRowActivate(rowIndex)}
+                    onChange={(e) =>
+                      onRowChange(
+                        rowIndex,
+                        "amount",
+                        parseFloat(e.target.value) || 0
+                      )
+                    }
+                  />
+                </TableField>
+                <TableField>
+                  <select
+                    className="input-field text-sm h-9"
+                    disabled={isDisabled}
+                    value={row.unit}
+                    onFocus={() => onRowActivate(rowIndex)}
+                    onChange={(e) =>
+                      onRowChange(rowIndex, "unit", e.target.value)
+                    }
+                  >
+                    <option value=""></option>
+                    {SATUAN_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </TableField>
+                <TableField>
+                  <select
+                    className="input-field text-sm h-9"
+                    disabled={isDisabled}
+                    value={row.packaging}
+                    onFocus={() => onRowActivate(rowIndex)}
+                    onChange={(e) =>
+                      onRowChange(rowIndex, "packaging", e.target.value)
+                    }
+                  >
+                    <option value=""></option>
+                    {JENIS_KEMASAN_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </TableField>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-5 pt-4 border-t border-slate-100">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+              Jumlah LOA
+            </div>
+            <div className="text-lg font-bold text-slate-800">
+              {formatNumber(totalLoa)}
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+              Jumlah GRT
+            </div>
+            <div className="text-lg font-bold text-slate-800">
+              {formatNumber(totalGrt)}
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 md:col-span-2">
+            <div className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+              Keterangan Keseluruhan Barang
+            </div>
+            <div className="text-sm font-semibold text-slate-800 mt-1">
+              {descriptionText}
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+              Total Jumlah/Massa/Penumpang
+            </div>
+            <div className="text-lg font-bold text-slate-800">
+              {formatNumber(totalAmount)}
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+              Keterangan Keseluruhan Satuan
+            </div>
+            <div className="text-sm font-semibold text-slate-800 mt-1">
+              {unitText}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+EntryCategoryCard.propTypes = {
+  title: PropTypes.string.isRequired,
+  rows: PropTypes.arrayOf(
+    PropTypes.shape({
+      loa: PropTypes.number.isRequired,
+      grt: PropTypes.number.isRequired,
+      activity: PropTypes.string.isRequired,
+      commodity: PropTypes.string.isRequired,
+      description: PropTypes.string.isRequired,
+      amount: PropTypes.number.isRequired,
+      unit: PropTypes.string.isRequired,
+      packaging: PropTypes.string.isRequired,
+    })
+  ).isRequired,
+  isDisabled: PropTypes.bool,
+  onRowActivate: PropTypes.func.isRequired,
+  onRowChange: PropTypes.func.isRequired,
+};
+
+const EntryForm = (props) => {
+  const { isDisabled } = props;
+  const [entries, setEntries] = useState(createInitialEntriesState);
+  const [draftStatus, setDraftStatus] = useState("saved");
+  const isFirstRenderRef = useRef(true);
+  const skipNextAutosaveRef = useRef(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+
+  const updateRowField = (categoryKey, rowIndex, field, value) => {
+    setDraftStatus("saving");
+    setEntries((prev) => {
+      const nextRows = prev[categoryKey].map((row, idx) => {
+        if (idx !== rowIndex) return row;
+        return { ...row, [field]: value };
+      });
+      return { ...prev, [categoryKey]: nextRows };
+    });
   };
 
-  const [formData, setFormData] = useState(defaultFormState);
+  const handleRowActivate = (categoryKey, rowIndex) => {
+    const currentRows = entries[categoryKey];
+    const isLastRow = rowIndex === currentRows.length - 1;
+    const hasAnyRowData = currentRows.some(hasRowData);
+    if (!isLastRow || !hasAnyRowData) return;
+
+    setDraftStatus("saving");
+    setEntries((prev) => {
+      const prevRows = prev[categoryKey];
+      return {
+        ...prev,
+        [categoryKey]: [...prevRows, createEmptyRow()],
+      };
+    });
+  };
+
+  const handleSubmitData = async () => {
+    setSubmitError("");
+    const payload = {
+      luar_negeri: entries.luar_negeri.filter(hasRowData),
+      dalam_negeri: entries.dalam_negeri.filter(hasRowData),
+      perintis: entries.perintis.filter(hasRowData),
+      rakyat: entries.rakyat.filter(hasRowData),
+    };
+
+    try {
+      setIsSubmitting(true);
+      await submitEntries(payload);
+      skipNextAutosaveRef.current = true;
+      setEntries(createInitialEntriesState());
+      setDraftStatus("saved");
+    } catch (err) {
+      console.error("Submit failed", err);
+      setSubmitError("Gagal mengirim data. Silakan coba lagi.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   useEffect(() => {
-    if (initialData) {
-      setFormData({
-        ...defaultFormState,
-        ...initialData,
-        // Ensure komoditas is set if editing old data that might match?
-        // For now, if old data doesn't have komoditas, user picks it.
-      });
-    } else {
-      setFormData(defaultFormState);
-    }
-  }, [initialData]);
-
-  const handleChange = (e) => {
-    const { name, value, type } = e.target;
-
-    // Handle Commodity Change specifically
-    if (name === "komoditas") {
-      const unit = UNIT_MAPPING[value] || "";
-
-      // Auto-set fields based on commodity
-      let kemasan = formData.jenis_kemasan;
-      let j_muatan = "Barang";
-      let n_muatan = formData.nama_muatan;
-
-      if (value.includes("Container")) kemasan = "Peti Kemas";
-      else if (["Motor", "Mobil", "Truk", "Bus", "Alat Berat"].includes(value))
-        kemasan = "Unit";
-      else if (value === "Penumpang") {
-        j_muatan = "Manusia";
-        kemasan = "-";
-      } else {
-        j_muatan = "Barang"; // Default
-      }
-
-      if (value === "Container (kosong)") {
-        n_muatan = "Kontainer kosong";
-      }
-
-      setFormData((prev) => ({
-        ...prev,
-        komoditas: value,
-        satuan_muatan: unit,
-        jenis_muatan: j_muatan,
-        jenis_kemasan: kemasan,
-        nama_muatan: n_muatan,
-      }));
+    if (isFirstRenderRef.current) {
+      isFirstRenderRef.current = false;
       return;
     }
 
-    setFormData((prev) => ({
-      ...prev,
-      [name]: type === "number" ? parseFloat(value) || 0 : value,
-    }));
-  };
+    if (skipNextAutosaveRef.current) {
+      skipNextAutosaveRef.current = false;
+      return;
+    }
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onSubmit(formData);
-  };
+    const timeoutId = window.setTimeout(() => {
+      console.log("Autosaving draft", entries);
+      setDraftStatus("saved");
+    }, 5000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [entries]);
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-8">
-      {/* 1. IDENTITAS KAPAL */}
-      <div className="bg-white p-6 rounded-xl shadow-soft border border-slate-100">
-        <div className="flex items-center gap-2 mb-6 border-b border-slate-100 pb-4">
-          <Ship className="text-primary-600" size={20} />
-          <h3 className="text-lg font-bold text-slate-800">Identitas Kapal</h3>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-1.5">
-            <label className="label-text">
-              Nama Kapal <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              name="nama_kapal"
-              value={formData.nama_kapal}
-              onChange={handleChange}
-              className="input-field"
-              placeholder="Contoh: KM. Sejahtera"
-              required
-              disabled={isDisabled}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="label-text">
-              Bendera <span className="text-red-500">*</span>
-            </label>
-            <select
-              name="bendera"
-              value={formData.bendera}
-              onChange={handleChange}
-              className="input-field"
-              required
-              disabled={isDisabled}
-            >
-              <option value="">Pilih Negara...</option>
-              {COUNTRIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="label-text">
-              Pemilik / Agent <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              name="pemilik_agen"
-              value={formData.pemilik_agen}
-              onChange={handleChange}
-              className="input-field"
-              placeholder="Nama Pemilik / Agen"
-              required
-              disabled={isDisabled}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="label-text">Kategori Pelayaran</label>
-            <select
-              name="kategori_pelayaran"
-              value={formData.kategori_pelayaran}
-              onChange={handleChange}
-              className="input-field"
-              disabled={isDisabled}
-            >
-              <option value="Dalam Negeri">Dalam Negeri</option>
-              <option value="Luar Negeri">Luar Negeri</option>
-              <option value="Perintis">Perintis</option>
-              <option value="Rakyat">Rakyat</option>
-            </select>
-          </div>
+    <div className="space-y-8">
+      <div className="flex justify-end items-center gap-4">
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={handleSubmitData}
+          disabled={isDisabled || isSubmitting}
+        >
+          {isSubmitting ? "Submitting..." : "Submit Data"}
+        </button>
+        <div className="text-xs font-semibold text-slate-500">
+          {draftStatus === "saving" ? "Saving draft..." : "Saved ✓"}
         </div>
       </div>
-
-      {/* 2. DIMENSI & KEGIATAN */}
-      <div className="bg-white p-6 rounded-xl shadow-soft border border-slate-100">
-        <div className="flex items-center gap-2 mb-6 border-b border-slate-100 pb-4">
-          <MapPin className="text-primary-600" size={20} />
-          <h3 className="text-lg font-bold text-slate-800">
-            Dimensi & Kegiatan
-          </h3>
+      {submitError && (
+        <div className="text-right text-sm font-medium text-red-600">
+          {submitError}
         </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <div className="space-y-1.5">
-            <label className="label-text">LOA (m)</label>
-            <input
-              type="number"
-              name="loa"
-              value={formData.loa}
-              onChange={handleChange}
-              className="input-field"
-              min="0"
-              step="0.01"
-              disabled={isDisabled}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="label-text">GRT</label>
-            <input
-              type="number"
-              name="grt"
-              value={formData.grt}
-              onChange={handleChange}
-              className="input-field"
-              min="0"
-              disabled={isDisabled}
-            />
-          </div>
-
-          <div className="md:col-span-2 space-y-1.5">
-            <label className="label-text">Jenis Kegiatan</label>
-            <select
-              name="jenis_kegiatan"
-              value={formData.jenis_kegiatan}
-              onChange={handleChange}
-              className="input-field"
-              disabled={isDisabled}
-            >
-              <option value="Bongkar">Bongkar</option>
-              <option value="Muat">Muat</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {/* 3. DETAIL MUATAN */}
-      <div className="bg-white p-6 rounded-xl shadow-soft border border-slate-100">
-        <div className="flex items-center gap-2 mb-6 border-b border-slate-100 pb-4">
-          <Package className="text-primary-600" size={20} />
-          <h3 className="text-lg font-bold text-slate-800">Detail Muatan</h3>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-1.5">
-            <label className="label-text">
-              Komoditas <span className="text-red-500">*</span>
-            </label>
-            <select
-              name="komoditas"
-              value={formData.komoditas || ""}
-              onChange={handleChange}
-              className="input-field"
-              required
-              disabled={isDisabled}
-            >
-              <option value="">Pilih Komoditas...</option>
-              {COMMODITIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="label-text">
-              Keterangan Barang / Jenis Hewan
-            </label>
-            <input
-              type="text"
-              name="nama_muatan"
-              value={formData.nama_muatan}
-              onChange={handleChange}
-              className="input-field"
-              placeholder="Contoh: Beras, Semen, Sapi..."
-              disabled={
-                isDisabled || formData.komoditas === "Container (kosong)"
-              }
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="label-text">
-                Jumlah / Massa / Penumpang{" "}
-                <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="number"
-                name="jumlah_muatan"
-                value={formData.jumlah_muatan}
-                onChange={handleChange}
-                className="input-field"
-                min="0"
-                step="0.01"
-                required
-                disabled={isDisabled}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="label-text">
-                Satuan{" "}
-                <span className="text-slate-400 text-xs">(Otomatis)</span>
-              </label>
-              <input
-                type="text"
-                name="satuan_muatan"
-                value={formData.satuan_muatan}
-                className="input-field bg-slate-100 font-medium text-slate-700"
-                readOnly
-              />
-            </div>
-          </div>
-
-          {formData.komoditas !== "Penumpang" && (
-            <div className="space-y-1.5">
-              <label className="label-text">
-                Jenis Kemasan <span className="text-red-500">*</span>
-              </label>
-              <select
-                name="jenis_kemasan"
-                value={formData.jenis_kemasan}
-                onChange={handleChange}
-                className="input-field"
-                required
-                disabled={isDisabled}
-              >
-                <option value="Curah">Curah</option>
-                <option value="Bag">Bag</option>
-                <option value="Box">Box</option>
-                <option value="Drum">Drum</option>
-                <option value="Peti Kemas">Peti Kemas</option>
-                <option value="Kandang">Kandang</option>
-                <option value="Unit">Unit</option>
-                <option value="Lainnya">Lainnya</option>
-              </select>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* 4. JADWAL & LAPORAN */}
-      <div className="bg-white p-6 rounded-xl shadow-soft border border-slate-100">
-        <div className="flex items-center gap-2 mb-6 border-b border-slate-100 pb-4">
-          <Calendar className="text-primary-600" size={20} />
-          <h3 className="text-lg font-bold text-slate-800">Jadwal & Laporan</h3>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-1.5">
-            <label className="label-text">
-              Tiba dari Pelabuhan Asal <span className="text-red-500">*</span>
-            </label>
-            <select
-              name="pelabuhan_asal"
-              value={formData.pelabuhan_asal}
-              onChange={handleChange}
-              className="input-field"
-              required
-              disabled={isDisabled}
-            >
-              <option value="">Pilih Pelabuhan</option>
-              {PORTS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="label-text">
-              Keberangkatan ke Pelabuhan Tujuan{" "}
-              <span className="text-red-500">*</span>
-            </label>
-            <select
-              name="pelabuhan_tujuan"
-              value={formData.pelabuhan_tujuan}
-              onChange={handleChange}
-              className="input-field"
-              required
-              disabled={isDisabled}
-            >
-              <option value="">Pilih Pelabuhan</option>
-              {PORTS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="label-text">Tambat (Tanggal & Jam)</label>
-            <input
-              type="datetime-local"
-              name="tanggal_tambat"
-              value={formData.tanggal_tambat}
-              onChange={handleChange}
-              className="input-field"
-              disabled={isDisabled}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="label-text">
-              Kolom Dermaga <span className="text-red-500">*</span>
-            </label>
-            <select
-              name="dermaga"
-              value={formData.dermaga}
-              onChange={handleChange}
-              className="input-field"
-              required
-              disabled={isDisabled}
-            >
-              <option value="">Pilih Dermaga...</option>
-              {BERTHS.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="label-text">
-              Tgl Kedatangan <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="date"
-              name="tanggal_kedatangan"
-              value={formData.tanggal_kedatangan || ""}
-              onChange={handleChange}
-              className="input-field"
-              required
-              disabled={isDisabled}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="label-text">
-              Tgl Keberangkatan <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="date"
-              name="tanggal_keberangkatan"
-              value={formData.tanggal_keberangkatan || ""}
-              onChange={handleChange}
-              className="input-field"
-              required
-              disabled={isDisabled}
-            />
-          </div>
-
-          <div className="md:col-span-2 space-y-1.5">
-            <label className="label-text">Keterangan</label>
-            <textarea
-              name="keterangan"
-              value={formData.keterangan}
-              onChange={handleChange}
-              className="input-field h-24 resize-none"
-              placeholder="Catatan tambahan (maksimal 500 karakter)..."
-              maxLength={500}
-              disabled={isDisabled}
-            />
-            <div className="text-right text-xs text-slate-400">0/500</div>
-          </div>
-
-          <div className="md:col-span-2 space-y-1.5">
-            <label className="label-text">
-              Tanggal Laporan <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="date"
-              name="tanggal_laporan"
-              value={formData.tanggal_laporan}
-              className="input-field bg-slate-100 font-medium text-slate-600 cursor-not-allowed"
-              readOnly
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* ACTION BUTTONS */}
-      <div className="flex justify-end gap-4 pt-6 border-t border-slate-200">
-        {initialData && (
-          <button
-            type="button"
-            onClick={onCancel}
-            className="btn btn-secondary"
-            disabled={isSubmitting || isDisabled}
-          >
-            <XCircle size={18} className="mr-2" />
-            Batal
-          </button>
-        )}
-
-        {!isDisabled && (
-          <>
-            <button
-              type="button"
-              className="btn btn-secondary text-slate-600"
-              onClick={() => setFormData(defaultFormState)}
-              disabled={isSubmitting}
-            >
-              <RefreshCw size={18} className="mr-2" />
-              Reset
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary shadow-lg shadow-primary-500/30"
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
-                <>Menyimpan...</>
-              ) : (
-                <>
-                  <Save size={18} className="mr-2" />
-                  {initialData ? "Update Data" : "Simpan Data"}
-                </>
-              )}
-            </button>
-          </>
-        )}
-      </div>
-    </form>
+      )}
+      {CATEGORIES.map((c) => (
+        <EntryCategoryCard
+          key={c.key}
+          title={c.title}
+          isDisabled={isDisabled}
+          rows={entries[c.key]}
+          onRowActivate={(rowIndex) => handleRowActivate(c.key, rowIndex)}
+          onRowChange={(rowIndex, field, value) =>
+            updateRowField(c.key, rowIndex, field, value)
+          }
+        />
+      ))}
+    </div>
   );
 };
 
 EntryForm.propTypes = {
-  initialData: PropTypes.object,
-  onSubmit: PropTypes.func.isRequired,
-  onCancel: PropTypes.func,
-  isSubmitting: PropTypes.bool,
   isDisabled: PropTypes.bool,
 };
 

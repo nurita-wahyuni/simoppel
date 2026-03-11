@@ -112,6 +112,106 @@ def get_entry_periods(
         cursor.close()
         conn.close()
 
+@router.post("/entries/report")
+def submit_batch_entries(
+    payload: dict = Body(...),
+    user: dict = Depends(get_current_user)
+):
+    if user.get("role") != "OPERATOR":
+        raise HTTPException(status_code=403, detail="Hanya operator yang dapat melakukan submit")
+
+    CATEGORY_MAP = {
+        "luar_negeri": "Luar Negeri",
+        "dalam_negeri": "Dalam Negeri",
+        "perintis": "Perintis",
+        "rakyat": "Rakyat",
+    }
+
+    def has_row_data(row: dict) -> bool:
+        if not isinstance(row, dict):
+            return False
+        loa = float(row.get("loa") or 0)
+        grt = float(row.get("grt") or 0)
+        activity = str(row.get("activity") or "").strip()
+        commodity = str(row.get("commodity") or "").strip()
+        description = str(row.get("description") or "").strip()
+        amount = float(row.get("amount") or 0)
+        unit = str(row.get("unit") or "").strip()
+        packaging = str(row.get("packaging") or "").strip()
+        return any([
+            loa != 0,
+            grt != 0,
+            bool(activity),
+            bool(commodity),
+            bool(description),
+            amount != 0,
+            bool(unit),
+            bool(packaging),
+        ])
+
+    conn = get_db_connection()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Database tidak terhubung")
+
+    cursor = conn.cursor()
+    insert_sql = """
+        INSERT INTO ship_entries (
+            operator_id,
+            kategori_pelayaran,
+            loa,
+            grt,
+            jenis_kegiatan,
+            komoditas,
+            nama_muatan,
+            jumlah_muatan,
+            satuan_muatan,
+            jenis_kemasan,
+            tanggal_laporan,
+            status,
+            submitted_at,
+            submit_method
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURDATE(), 'SUBMITTED', NOW(), 'MANUAL')
+    """
+
+    total_rows = 0
+    try:
+        for cat_key, rows in (payload or {}).items():
+            kategori = CATEGORY_MAP.get(cat_key)
+            if not kategori:
+                continue
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if not has_row_data(row):
+                    continue
+                values = (
+                    user["id"],
+                    kategori,
+                    float(row.get("loa") or 0),
+                    float(row.get("grt") or 0),
+                    (row.get("activity") or "Bongkar"),
+                    (row.get("commodity") or None),
+                    (row.get("description") or None),
+                    float(row.get("amount") or 0),
+                    (row.get("unit") or None),
+                    (row.get("packaging") or None),
+                )
+                cursor.execute(insert_sql, values)
+                total_rows += 1
+
+        conn.commit()
+        return {"message": "Entries submitted successfully", "rows_inserted": total_rows}
+    except Exception as e:
+        conn.rollback()
+        logger.exception("Error submitting batch entries")
+        raise HTTPException(status_code=500, detail="Gagal menyimpan data") from e
+    finally:
+        try:
+            cursor.close()
+        finally:
+            conn.close()
+
 @router.get("/entries/{entry_id}")
 def get_entry_detail(
     entry_id: int,

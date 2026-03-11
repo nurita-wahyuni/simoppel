@@ -56,6 +56,11 @@ export const manualSubmitEntries = async (data) => {
   return response.data;
 };
 
+export const submitEntries = async (payload) => {
+  const response = await api.post("/entries/report", payload);
+  return response.data;
+};
+
 // --- Dashboard ---
 export const getDashboardStats = async () => {
   const response = await api.get("/dashboard/stats");
